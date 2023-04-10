@@ -12,6 +12,7 @@ return by reference, (7) returning estimation outputs by reference.
 
 ## Requirements
 * numpy -- needed for matrix multiplication and large arrays
+* (optional) numba -- used for the optional matrix multiplication speedups
 
 ## Quickstart
 This repo is designed to work as a module out-of-the-box. Each class constructs
