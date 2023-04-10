@@ -10,6 +10,13 @@ return matrices, (3) additional arguments for callables, (4) njit optimization,
 (5) inferring matrix size from user-supplied arguments, (6) callables that
 return by reference, (7) returning estimation outputs by reference.
 
+## TODO
+* directly support nonautonomous systems
+* add support for feedforward systems
+* unify user-supplied function signatures
+* re-organize matrix helper function signature
+* decide what do do with matrix helper return-by-reference signature split
+
 ## Requirements
 * numpy -- needed for matrix multiplication and large arrays
 * (optional) numba -- used for the optional matrix multiplication speedups
