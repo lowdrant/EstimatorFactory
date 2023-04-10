@@ -1,5 +1,5 @@
-__all__ = ['ParticleFilterFactory', ]
-
+"""Particle filter implementation"""
+__all__ = ['ParticleFilterFactory']
 from numpy import zeros
 from numpy.random import choice
 

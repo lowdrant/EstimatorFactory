@@ -19,6 +19,7 @@ min-args = 1
 max-locals = 35
 max-statements = 100
 max-attributes = 30
+min-public-methods = 1
 
 variable-naming-style = any
 class-naming-style = PascalCase

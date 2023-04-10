@@ -1,6 +1,5 @@
+"""EKF implementation"""
 __all__ = ['EKFFactory']
-
-
 from warnings import warn
 
 from numpy import asarray, eye, zeros
@@ -52,10 +51,10 @@ except ModuleNotFoundError:
     warn('Supressing njit-optimized functions (Numba module not found).')
 
     def _EKF_matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat):
-        raise NotImplementedError('numba not installed')
+        raise NotImplementedError('Numba not installed')
 
     def _EKF_matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t):
-        raise NotImplementedError('numba not installed')
+        raise NotImplementedError('Numba not installed')
 
 
 class EKFFactory:
