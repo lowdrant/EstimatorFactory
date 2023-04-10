@@ -4,7 +4,7 @@ from warnings import warn
 
 from numpy import asarray, zeros
 
-from .matmuls import *
+from ._matmuls import *
 
 
 class EKFFactory:
@@ -134,13 +134,13 @@ class EKFFactory:
             self.R_t, self.Q_t = zeros((N, N)), zeros((M, M))
 
         self.g, self.h, self.rbr = g, h, rbr
-        self._matmuls = self._factory_matmuls(callrbr, njit)
+        self._matmuls = factory_matmuls(callrbr, njit)
         self._linearize = self._factory_linearize(rbr)
 
     def __call__(self, mu, sigma, u, z, mu_t=None, sigma_t=None):
         """run EKF - see Thrun, Probabilistic Robotics, Table 3.3 """
         mubar, zhat, G, H, R, Q = self._linearize(mu, sigma, u, z)
-        return self._matmuls(G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t)
+        return self._matmuls(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
 
     # ========================================================================
     # Setup
@@ -264,35 +264,3 @@ class EKFFactory:
         self._Rfun(mu, sigma, u, z)
         self._Qfun(mu, sigma, u, z)
         return self.mubar, self.zhat, self.G_t, self.H_t, self.R_t, self.Q_t
-
-    # ========================================================================
-    # Matrix Multiplication Factory
-    #
-    # Speeding up matrix multiplication, at least via njit, provides
-    # noticiable performance gains once the python bytecode is compiled.
-    #
-
-    def _factory_matmuls(self, callrbr, njit):
-        if callrbr and njit:
-            return self._matmuls_rbr_njit
-        elif callrbr:
-            return self._matmuls_rbr
-        elif njit:
-            return self._matmuls_njit
-        return self._matmuls_base
-
-    def _matmuls_base(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
-        """Basic matrix multiplication implementation."""
-        return matmuls(sigma, z, R, Q, H, G, mubar, zhat)
-
-    def _matmuls_rbr(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
-        """Return-by-reference matrix multiplications."""
-        return matmuls_rbr(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
-
-    def _matmuls_njit(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
-        """njit-optimized matrix multiplications."""
-        return matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat)
-
-    def _matmuls_rbr_njit(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
-        """Return-by-reference, njit-optimized matrix multiplications."""
-        return matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
