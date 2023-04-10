@@ -2,59 +2,9 @@
 __all__ = ['EKFFactory']
 from warnings import warn
 
-from numpy import asarray, eye, zeros
-from numpy.linalg import pinv
+from numpy import asarray, zeros
 
-
-def _EKF_matmuls(sigma, z, R, Q, H, G, mubar, zhat):
-    """Generic EKF matmuls"""
-    N = mubar.size
-    sigmabar = G @ sigma @ G.T + R
-    K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
-    mu_t = mubar + K @ (z - zhat)
-    sigma_t = (eye(N) - K@H)@sigmabar
-    return mu_t, sigma_t
-
-
-def _EKF_matmuls_rbr(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t):
-    """Return-by-reference EKF matmuls"""
-    N = mubar.size
-    sigmabar = G @ sigma @ G.T + R
-    K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
-    mu_t[...] = mubar + K @ (z - zhat)
-    sigma_t[...] = (eye(N) - K@H)@sigmabar
-    return mu_t, sigma_t
-
-
-try:
-    from numba import njit
-    @njit
-    def _EKF_matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat):
-        """Generic EKF matmuls with njit decorator"""
-        N = mubar.size
-        sigmabar = G @ sigma @ G.T + R
-        K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
-        mu_t = mubar + K @ (z - zhat)
-        sigma_t = (eye(N) - K@H)@sigmabar
-        return mu_t, sigma_t
-
-    @njit
-    def _EKF_matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t):
-        """Return-by-reference EKF matmuls with njit decorator"""
-        N = mubar.size
-        sigmabar = G @ sigma @ G.T + R
-        K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
-        mu_t[...] = mubar + K @ (z - zhat)
-        sigma_t[...] = (eye(N) - K@H)@sigmabar
-        return mu_t, sigma_t
-except ModuleNotFoundError:
-    warn('Supressing njit-optimized functions (Numba module not found).')
-
-    def _EKF_matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat):
-        raise NotImplementedError('Numba not installed')
-
-    def _EKF_matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t):
-        raise NotImplementedError('Numba not installed')
+from .matmuls import *
 
 
 class EKFFactory:
@@ -333,16 +283,16 @@ class EKFFactory:
 
     def _matmuls_base(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
         """Basic matrix multiplication implementation."""
-        return _EKF_matmuls(sigma, z, R, Q, H, G, mubar, zhat)
+        return matmuls(sigma, z, R, Q, H, G, mubar, zhat)
 
     def _matmuls_rbr(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
         """Return-by-reference matrix multiplications."""
-        return _EKF_matmuls_rbr(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
+        return matmuls_rbr(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
 
     def _matmuls_njit(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
         """njit-optimized matrix multiplications."""
-        return _EKF_matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat)
+        return matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat)
 
     def _matmuls_rbr_njit(self, G, sigma, R, H, Q, mubar, z, zhat, mu_t, sigma_t):
         """Return-by-reference, njit-optimized matrix multiplications."""
-        return _EKF_matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
+        return matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
