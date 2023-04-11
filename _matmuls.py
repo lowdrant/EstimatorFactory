@@ -4,13 +4,11 @@ Between the EKF and the KF, the matrix multiplications are the same, but
 the variable names differ. These functions use the EKF convention since I
 wrote the EKF class first.
 """
+__all__ = ['factory_matmuls']
 from warnings import warn
 
 from numpy import eye
 from numpy.linalg import pinv
-
-__all__ = ['factory_matmuls']
-__all__ += ['matmuls' + v for v in ('', '_rbr', '_njit', '_rbr_njit')]
 
 
 def factory_matmuls(rbr, njit):
@@ -74,7 +72,7 @@ try:
 except ModuleNotFoundError:
     warn('Supressing njit-optimized functions (Numba module not found).')
 
-    def matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t=None,sigma_t=None):
+    def matmuls_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t=None, sigma_t=None):
         raise NotImplementedError('Numba not installed')
 
     def matmuls_rbr_njit(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t):

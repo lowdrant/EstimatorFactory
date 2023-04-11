@@ -11,11 +11,13 @@ return matrices, (3) additional arguments for callables, (4) njit optimization,
 return by reference, (7) returning estimation outputs by reference.
 
 ## TODO
-* directly support nonautonomous systems
-* add support for feedforward systems
 * unify user-supplied function signatures
+* directly support nonautonomous systems
+* cleanup matrix wrappers in KF,EKF
 * re-organize matrix helper function signature
 * decide what do do with matrix helper return-by-reference signature split
+* add support for feedforward systems
+* subclass KF to make EKF?
 
 ## Requirements
 * numpy -- needed for matrix multiplication and large arrays
@@ -30,7 +32,7 @@ $ git clone https://github.com/lowdrant/EstimatorFactory.git
 $ python3
 >>> from EstimatorFactory import EKFFactory
 >>> help(EKFFactory)
->>> ekf = EKFactory(g,h,G,H,R,Q)
+>>> ekf = EKFFactory(g,h,G,H,R,Q)
 >>> for i, d in enumerate(data):
 >>>     mu, sigma = ekf(prevmu, prevsigma, u, d)
 ```

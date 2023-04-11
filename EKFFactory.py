@@ -151,7 +151,7 @@ class EKFFactory:
         if N is None:
             N = len(G) if not callable(G) else N
             N = len(R) if not callable(R) else N
-        if M is not None:
+        if M is None:
             M = len(Q) if not callable(Q) else M
         if not callable(H):  # H contains both
             M = len(H) if M is None else M
