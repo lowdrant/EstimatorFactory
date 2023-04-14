@@ -2,9 +2,76 @@
 __all__ = ['EKFFactory']
 from warnings import warn
 
-from numpy import asarray, zeros
+from numpy import asarray, eye, zeros
+from numpy.linalg import pinv
 
-from ._matmuls import *
+
+def factory_matmuls(rbr, njit):
+    """Get the appropriate matrix multiplication function
+    INPUTS:
+        rbr -- bool -- true if matrix mults should return by reference
+        njit -- bool -- true if matrix mults should be numba compiled
+    OUTPUTS:
+        callable (sigma, z/y, R, Q, H/C, G/A, mubar, zhat) -> mu, sigma
+    """
+    if rbr and njit:
+        return matmuls_rbr_njit
+    elif rbr:
+        return matmuls_rbr
+    elif njit:
+        return matmuls_njit
+    return matmuls
+
+
+def matmuls(mubar, sigma, z, zhat, G, H, R, Q, mu_t=None, sigma_t=None):
+    """Generic EKF matmuls"""
+    N = mubar.size
+    sigmabar = G @ sigma @ G.T + R
+    K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
+    mu_t = mubar + K @ (z - zhat)
+    sigma_t = (eye(N) - K@H)@sigmabar
+    return mu_t, sigma_t
+
+
+def matmuls_rbr(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t):
+    """Return-by-reference EKF matmuls"""
+    N = mubar.size
+    sigmabar = G @ sigma @ G.T + R
+    K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
+    mu_t[...] = mubar + K @ (z - zhat)
+    sigma_t[...] = (eye(N) - K@H)@sigmabar
+    return mu_t, sigma_t
+
+
+try:
+    from numba import njit
+    @njit
+    def matmuls_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t=None, sigma_t=None):
+        """Generic EKF matmuls with njit decorator"""
+        N = mubar.size
+        sigmabar = G @ sigma @ G.T + R
+        K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
+        mu_t = mubar + K @ (z - zhat)
+        sigma_t = (eye(N) - K@H)@sigmabar
+        return mu_t, sigma_t
+
+    @njit
+    def matmuls_rbr_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t):
+        """Return-by-reference EKF matmuls with njit decorator"""
+        N = mubar.size
+        sigmabar = G @ sigma @ G.T + R
+        K = sigmabar @ H.T @ pinv(H@sigmabar@H.T + Q)
+        mu_t[...] = mubar + K @ (z - zhat)
+        sigma_t[...] = (eye(N) - K@H)@sigmabar
+        return mu_t, sigma_t
+except ModuleNotFoundError:
+    warn('Supressing njit-optimized functions (Numba module not found).')
+
+    def matmuls_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t=None, sigma_t=None):
+        raise ModuleNotFoundError('Numba not installed')
+
+    def matmuls_rbr_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t):
+        raise ModuleNotFoundError('Numba not installed')
 
 
 class EKFFactory:
@@ -141,7 +208,7 @@ class EKFFactory:
         """run EKF - see Thrun, Probabilistic Robotics, Table 3.3 """
         mubar, zhat, G, H, R, Q = self._linearize(mu, sigma, u, z)
         return self._matmuls(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
-
+        return self._matmuls(mubar, sigma, z, zhat, G, H, R, Q)
     # ========================================================================
     # Setup
 
