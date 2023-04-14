@@ -5,14 +5,24 @@ from warnings import warn
 from numpy import asarray, eye, zeros
 from numpy.linalg import pinv
 
+from .KFFactory import KFFactory
+
 
 def factory_matmuls(rbr, njit):
-    """Get the appropriate matrix multiplication function
+    """Get the appropriate matrix multiplication function.
     INPUTS:
         rbr -- bool -- true if matrix mults should return by reference
         njit -- bool -- true if matrix mults should be numba compiled
     OUTPUTS:
-        callable (sigma, z/y, R, Q, H/C, G/A, mubar, zhat) -> mu, sigma
+        callable -- signature:
+            (mu, sigma, u, z, A, B, C, R, Q, mu_t=None, sigma_t=None)
+            ->
+            (mu_t, sigma_t)
+    NOTES:
+        Why so many matmul arguments:
+            For the most mileagle from njit and return-by-ref settings,
+            it is good to (1) minimize the number of numpy function calls,
+            e.g. `H(...)`, (2) minimize the number of intermediate arrays.
     """
     if rbr and njit:
         return matmuls_rbr_njit
@@ -74,87 +84,79 @@ except ModuleNotFoundError:
         raise ModuleNotFoundError('Numba not installed')
 
 
-class EKFFactory:
+class EKFFactory(KFFactory):
     # region
     """EKF implementation for autonomous systems, as described in
     "Probabilistic Robotics" by Sebastian Thrun. Provides indirect support for
     nonautonomous systems.
 
     Directly supports:
-        1. mixed constant and callable Jacobian, covariance matrices
-        2. return-by-reference callables (g, h, matrices)
+        1. forced, unforced, autonomous, and nonautonomous systems
+        2. mixed constant and callable dynamics, covariance matrices
+        3. additional (constant) parameters passed to callables
+        4. njit-optimized matrix operations, set by flag in init.
+        5. return-by-reference callables
            - if used, ALL callables must return by reference
-           - return-by-reference MUST be through 3rd argument
-        3. inferring matrix sizes for memory preallocation
-        4. return-by-reference estimation
-        5. njit-optimized matrix operations
-        6. additional (constant, user-supplied) parameters passed to callables
+           - return-by-reference MUST be through LAST argument
+        6. inferring matrix sizes for memory preallocation
 
     Indirectly supports:
-        1. Nonautonomous systems via direct attribute access (see Examples)
-        2. Changing call signatures via subclassing (see Notes)
+        1. unorthodox call signatures via direct attribute access
 
     REQUIRED INPUTS:
-        g -- callable -- state transition function; (u,mu)->mubar
-        h -- callable -- observation function; (mubar)->zhat
-        G -- callable or NxN -- state transition Jacobian; (u,mu)->NxN
-        H -- callable or MxN -- observation Jacobian; (mubar)->MxN
-        R -- callable or NxN -- state covariance; (u,mu,sigma,z)->NxN
-        Q -- callable or MxM -- observation covariance; (u,mu,sigma,z)->MxM
+        g -- callable -- state transition function; (t,u,mu)->mubar
+        h -- callable -- measurement function; (t,mubar)->zhat
+        G -- callable or NxN -- state transition Jacobian; (t,u,mu)->NxN
+        H -- callable or MxN -- measurement Jacobian; (t,mubar)->MxN
+        R -- callable or NxN -- state covariance; (t)->NxN
+        Q -- callable or MxM -- measurement covariance; (t)->MxM
+
+        Callables are expected to take `time` as the first argument, followed
+        by additonal parameters. If return-by-reference, the return-by-ref
+        argument should be LAST. See Examples. For autonomous or unforced
+        systems, simply have the callable not use the time or system input
+        variable.
 
         Callables can also be passed additional (constant) parameters by
         means of the `*_pars` optional keyword args. See Notes.
 
     OPTIONAL INPUTS:
-        n -- int, optional -- state space dimension, default: None
-        k -- int, optional -- observation space dimention, default: None
-        rbr -- bool, optional -- set true if callables return by reference, default: False
-        callrbr -- bool, optional -- set true if EKF call should return by reference, default: False
-        njit -- bool, optional -- use njit optimization for matrix operations, default: False
-        g_pars,h_pars,H_pars,G_pars,R_pars,Q_pars -- parameters for callables. See Notes
+        n -- int, default:None -- state dimension
+        k -- int, default:None -- measurement dimension
+        rbr -- bool, default:False -- set true if callables return by reference
+        callrbr -- bool, default:False -- set true if EKF call should return by reference
+        njit -- bool, default:False -- use njit optimization for matrix operations
+        g_pars,h_pars,...,Q_pars -- parameters for callables. See Notes
 
     EXAMPLES:
         Run a single EKF step:
         >>> ekf = EKF(g,h,G,H,R,Q)
-        >>> mu1, sigma1 = ekf(mu0, sigma0, u0, observation0)
-
-        Run EKF on unforced system:
-        >>> mu1, sigma1 = ekf(mu0, sigma0, 0, observation0)
-
-        Configure to use njit-optimized matrix operations:
-        >>> ekf = EKF(g,h,G,H,R,Q, njit=True)
-
-        Configure for ALL dynamics callables returning by reference:
-        >>> ekf = EKF(g,h,G,H,R,Q, rbr=True)
-
-        Explicitly specify matrix sizes:
-        >>> ekf = EKF(g,h,G,H,R,Q, N=N,M=M)
+        >>> mu1, sigma1 = ekf(mu0, sigma0, observation0, u0, t0)
 
         Configure to return estimates by reference:
         >>> mu1, sigma1 = zeros_like(mu0), zeros_like(sigma0)
         >>> ekf = EKF(g,h,G,H,R,Q, callrbr=True)
-        >>> ekf(mu0, sigma0, observation, mu1, sigma1)
+        >>> ekf(mu0, sigma0, observation0, mu1, sigma1)
 
-        Run EKF when a dynamics matrix updates weirdly, e.g. over time
-        >>> mu, sigma = zeros(L,N), zeros(L,N,N)
+        Run EKF when a dynamics matrix updates weirdly:
+        >>> mu, sigma = zeros((L,N)), zeros((L,N,N))
         >>> mu[-1], sigma[-1] = mu0, sigma0  # for loop compatability
         >>> ekf = EKF(g,h,G,H,R,Q)
         >>> for i in range(L):
-        >>>     mu[i], sigma[i] = ekf(mu[i-1], sigma[i-1], observation[i])
+        >>>     mu[i], sigma[i] = ekf(mu[i-1], sigma[i-1], observation[i], ...)
         >>>     ekf.R = asarray(myWeirdRFunc(i))  # ENSURE ARRAY
-
 
     NOTES:
         n,k:
             Constructor will attempt to infer matrix size from matrices. This
             will not overwrite n or k if they are specified at construction
 
-        return-by-reference: THIRD (3rd) function arg must be
-                             return-by-reference variable. Also, ALL callables
-                             must be return by reference if this option is
-                             used. Since it is not possible to tell if a
-                             function returns by reference, I did not provide
-                             an rbr flag for each possible callable.
+        return-by-reference:
+            LAST function arg must be return-by-reference variable. Also, ALL
+            callables must be return by reference if this option is used.
+            Since it is not possible to tell if a function returns by
+            reference, I did not provide an rbr flag for each possible
+            callable.
 
         Callables with more args:
             Each callable also has an assosciated keyword argument,
@@ -164,7 +166,6 @@ class EKFFactory:
 
         Callables with very different call signatures:
             Subclass and overwrite the relevant wrappers.
-
 
     REFERENCES:
         Thrun, Probabilistic Robotics, Chp 3.3.
@@ -187,7 +188,7 @@ class EKFFactory:
         # Size Inference and Preallocation
         n, k = self._infer_mtxsz(kwargs.get('n', None), kwargs.get('k', None))
         for key in ('mubar', 'zhat', 'G_t', 'H_t', 'R_t', 'Q_t'):
-            setattr(self,key,None)
+            setattr(self, key, None)
         if (n is None) or (k is None):
             warn('Unable to infer matrix size. Return be reference will fail')
         else:
@@ -196,20 +197,21 @@ class EKFFactory:
             self.R_t, self.Q_t = zeros((n, n)), zeros((k, k))
 
         # Implementation Selection
-        rbr = kwargs.get('rbr', False)
+        self.rbr = kwargs.get('rbr', False)
         njit = kwargs.get('njit', False)
         callrbr = kwargs.get('callrbr', False)
-        self._matmuls = factory_matmuls(self.rbr, njit)
-        self._linearize = self._factory_linearize(rbr)
+        self._matmuls = factory_matmuls(callrbr, njit)
         self._init_safety_checks(n, k)
 
-    def __call__(self, mu, sigma, u, z, mu_t=None, sigma_t=None):
+    def __call__(self, mu, sigma, z, u=0, t=0, mu_t=None, sigma_t=None):
         """run EKF - see Thrun, Probabilistic Robotics, Table 3.3 """
-        mubar, zhat, G, H, R, Q = self._linearize(mu, sigma, u, z)
+        mubar = self._gfun(t, u, mu)
+        zhat = self._hfun(t, mubar)
+        G = self._mtx_wrapper('G', t, (u, mu))  # should return by ref
+        H = self._mtx_wrapper('H', t, (mubar,))
+        R = self._mtx_wrapper('R', t)
+        Q = self._mtx_wrapper('Q', t)
         return self._matmuls(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t)
-
-    # ========================================================================
-    # Setup
 
     def _infer_mtxsz(self, n, k):
         """Infer matrix sizes. No overwrite if n, k given as numbers.
@@ -253,99 +255,14 @@ class EKFFactory:
         if (n is None) or (k is None):
             assert not self.rbr, 'cannot return-by-ref matrices of unknown size'
 
-    # ========================================================================
-    # Dynamics Wrappers
-    #
-    # Wrapping the dynamics objects produces cleaner code than a factory
-    # approach. The user has ~5 interface choices that affect this class's
-    # implementation-level code:
-    #
-    #   1. functions (g, h, and matrix callables)
-    #       1a. return output directly
-    #       1b. return by reference (i.e. have the numpy `out=` argument)
-    #   2. matrices (G, H, R, Q)
-    #       2a. provided as constant matrices
-    #       2b. provided as callables (see above)
-    #
-    # This gives the class a total of ~10 possible implementations, 8 options
-    # for the matrices (callable or matrix) and 2 for the callables (return
-    # directly or by reference). It is easier to implement this with wrappers.
-    #
+    def _gfun(self, t, u, mu):
+        """g wrapper"""
+        if self.rbr:
+            return self.g(t, u, mu, *self.g_pars, self.mubar)
+        return self.g(t, u, mu, *self.g_pars)
 
-    @staticmethod
-    def _mtx_wrapper(obj, tgt, args):
-        """Universal logic for matrix functions.
-        INPUTS:
-            obj -- object with desired data
-            tgt -- ndarray where desired data will be stored
-            args -- arguments `obj` would take if `obj` is callable
-        """
-        if not callable(obj):
-            if tgt is None:
-                return obj.view(obj.dtype)
-            tgt[...] = obj.view(obj.dtype)
-            return tgt
-        return obj(*args)
-
-    def _gfun(self, u, mu):
-        """Wrap g with universal function call"""
-        args = [u, mu, self.mubar] if self.rbr else [u, mu]
-        return self.g(*args, *self.g_pars)
-
-    def _hfun(self, mubar):
-        """Wrap h with universal function call"""
-        args = [mubar, self.zhat] if self.rbr else [mubar]
-        return self.h(*args, *self.h_pars)
-
-    def _Gfun(self, u, mu):
-        """Wrap G with universal function call"""
-        args = [u, mu, self.G_t] if self.rbr else [u, mu]
-        return self._mtx_wrapper(self.G, self.G_t, args + self.G_pars)
-
-    def _Hfun(self, mubar):
-        """Wrap H with universal function call"""
-        args = [mubar, self.zhat] if self.rbr else [mubar]
-        return self._mtx_wrapper(self.H, self.H_t, args + self.H_pars)
-
-    def _Rfun(self, mu, sigma, u, z):
-        """Wrap R with universal function call"""
-        args = [mu, sigma, u, z, self.R_t] if self.rbr else [mu, sigma, u, z]
-        return self._mtx_wrapper(self.R, self.R_t, args + self.R_pars)
-
-    def _Qfun(self, mu, sigma, u, z):
-        """Wrap Q with universal function call"""
-        args = [mu, sigma, u, z, self.R_t] if self.rbr else [mu, sigma, u, z]
-        return self._mtx_wrapper(self.Q, self.Q_t, args + self.Q_pars)
-
-    # ========================================================================
-    # Linearization Factory
-    #
-    # Included more as a user courtesy. I couldn't find any noticable
-    # performance improvements using return-by-reference functions, but
-    # maybe someone in the future will.
-    #
-
-    def _factory_linearize(self, rbr):
-        if rbr:
-            return self._linearize_rbr
-        return self._linearize_base
-
-    def _linearize_base(self, mu, sigma, u, z):
-        """Linearization with no interface-changing optimizations."""
-        mubar = self._gfun(u, mu)
-        zhat = self._hfun(mubar)
-        G_t = self._Gfun(u, mu)
-        H_t = self._Hfun(mubar)
-        R_t = self._Rfun(mu, sigma, u, z)
-        Q_t = self._Qfun(mu, sigma, u, z)
-        return mubar, zhat, G_t, H_t, R_t, Q_t
-
-    def _linearize_rbr(self, mu, sigma, u, z):
-        """Linearization with return-by-reference optimizations."""
-        self._gfun(u, mu)
-        self._hfun(self.mubar)
-        self._Gfun(u, mu)
-        self._Hfun(self.mubar)
-        self._Rfun(mu, sigma, u, z)
-        self._Qfun(mu, sigma, u, z)
-        return self.mubar, self.zhat, self.G_t, self.H_t, self.R_t, self.Q_t
+    def _hfun(self, t, mubar):
+        """h wrapper"""
+        if self.rbr:
+            return self.h(t, mubar, *self.h_pars, self.zhat)
+        return self.h(t, mubar, *self.h_pars)

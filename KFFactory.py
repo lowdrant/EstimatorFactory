@@ -7,12 +7,15 @@ from numpy.linalg import pinv
 
 
 def factory_matmuls(rbr, njit):
-    """Get the appropriate matrix multiplication function
+    """Get the appropriate KF matrix multiplication function.
     INPUTS:
         rbr -- bool -- true if matrix mults should return by reference
         njit -- bool -- true if matrix mults should be numba compiled
     OUTPUTS:
-        callable (sigma, z/y, R, Q, H/C, G/A, mubar, zhat) -> mu, sigma
+         callable -- signature:
+            (mu, sigma, u, z, A, B, C, R, Q, mu_t=None, sigma_t=None)
+            ->
+            (mu_t, sigma_t)
     """
     if rbr and njit:
         return matmuls_rbr_njit
@@ -24,7 +27,7 @@ def factory_matmuls(rbr, njit):
 
 
 def matmuls(mu, sigma, u, z, A, B, C, R, Q, mu_t=None, sigma_t=None):
-    """Generic EKF matmuls"""
+    """Generic KF matmuls"""
     N = mu.size
     mubar = A @ mu + B @ u
     sigmabar = A @ sigma @ A.T + R
@@ -35,7 +38,7 @@ def matmuls(mu, sigma, u, z, A, B, C, R, Q, mu_t=None, sigma_t=None):
 
 
 def matmuls_rbr(mu, sigma, u, z, A, B, C, R, Q, mu_t, sigma_t):
-    """Return-by-reference EKF matmuls"""
+    """Return-by-reference KF matmuls"""
     N = mu.size
     mubar = A @ mu + B @ u
     sigmabar = A @ sigma @ A.T + R
@@ -81,6 +84,7 @@ except ModuleNotFoundError:
 
 
 class KFFactory:
+    # region
     """Construct Kalman Filter as described in "Probabilistic Robotics" by
     Sebastian Thrun.
 
@@ -93,6 +97,9 @@ class KFFactory:
            - if used, ALL callables must return by reference
            - return-by-reference MUST be through LAST argument
         6. inferring matrix sizes for memory preallocation
+
+    Indirectly supports:
+        1. unorthodox call signatures via direct attribute access
 
     REQUIRED INPUTS:
         A -- callable or NxN -- state matrix
@@ -114,7 +121,7 @@ class KFFactory:
         k -- int, optional -- measurement dimension, default: None
         rbr -- bool, optional -- use matrix return-by-reference, default: False
         njit -- bool, optional -- use njit optimization, default: False
-        A_pars,B_pars,...,Q_pars --
+        A_pars,B_pars,...,Q_pars -- parameters for callables. See Notes
 
     EXAMPLES:
         Single KF step:
@@ -134,9 +141,8 @@ class KFFactory:
         >>> mu[-1], sigma[-1] = mu0, sigma0  # for-loop compatability
         >>> kf = KFFactory(A,B,C,R_0,Q)
         >>> for i in range(L):
-        >>>     mu[i], sigma[i] = ekf(mu[i-1], sigma[i-1], observation[i])
+        >>>     mu[i], sigma[i] = kf(mu[i-1], sigma[i-1], observation[i])
         >>>     kf.R = asarray(myWeirdRFunc(i))  # ENSURE ARRAY
-
 
     NOTES:
         n,m,k:
@@ -163,6 +169,7 @@ class KFFactory:
         Thrun, Probabilistic Robotics, Chp 3.1.
         Thrun, Probabilistic Robotics, Table 3.1.
     """
+    # endregion
 
     def __init__(self, A, B, C, R, Q, **kwargs):
         # Matrix Setup
@@ -245,18 +252,19 @@ class KFFactory:
                     m = len(attr.T)
                     break
         if k is None:
-            for key in ('C', 'D', 'Q'):
+            for key in ('C', 'Q'):
                 attr = getattr(self, key)
                 if not callable(attr):
                     k = len(attr)
                     break
         return n, m, k
 
-    def _mtx_wrapper(self, key, t):
+    def _mtx_wrapper(self, key, t, args=[]):
         """Get matrix of name <key>. Universal interface for matrix attributes.
         INPUTS:
             key -- str -- matrix attribute name, e.g. 'A'
             t -- float -- time value of time step
+            args -- iterable -- args BEFORE `*_pars` but AFTER `t`
         RETURNS:
             matrix
         NOTES:
@@ -275,10 +283,10 @@ class KFFactory:
         tgt = getattr(self, key + '_t')
         pars = getattr(self, key + '_pars')
         if callable(obj) and self.rbr:
-            obj(t, *pars, tgt)
+            obj(t, *args, *pars, tgt)
             return tgt  # ensure return-by-ref by returning separately
         elif callable(obj):
-            return obj(t, *pars)
+            return obj(t, *args, *pars)
         elif tgt is None:
             return obj.view(obj.dtype)
         tgt[...] = obj.view(obj.dtype)  # ensure view insertion
