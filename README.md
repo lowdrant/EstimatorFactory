@@ -29,10 +29,23 @@ $ python3
 >>> help(EKFFactory)
 >>> ekf = EKFFactory(g,h,G,H,R,Q)  # callable
 >>> for i, d in enumerate(data):
->>>     mu, sigma = ekf(prevmu, prevsigma, u, d)
+>>>     mu, sigma = ekf(prevmu, prevsigma, measurement, prev_u, t)
 ```
 
-
+### A Gotcha/Minor Inconsistency
+The classes return a callable with the signature:
+```
+(estimate, measurement, input, time) -> (estimate)
+```
+However, the constructor expects the system callables (e.g. g, C, etc.) to
+have the signature:
+```
+(time, system_args, additional_args, return_by_ref_arg) -> (output)
+```
+This difference came from "time-first" system functions seeming more readable,
+since they had variable numbers of "system_args," but my toy system (re:unit
+test) was autonomous and inputless, which made shoving u and t to the end feel
+more natural.
 
 ## Some Thoughts
 ### On Mathematical Usage
