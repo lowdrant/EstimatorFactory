@@ -72,9 +72,11 @@ except ModuleNotFoundError:
     warn('Supressing njit-optimized functions (Numba module not found).')
 
     def matmuls_njit(mu, sigma, u, z, G, H, R, Q, mu_t=None, sigma_t=None):
+        """matmuls_njit placeholder for when Numba not present"""
         raise ModuleNotFoundError('Numba not installed')
 
     def matmuls_rbr_njit(mu, sigma, u, z, G, H, R, Q, mu_t, sigma_t):
+        """matmuls_rbr_njit placeholder for when Numba not present"""
         raise ModuleNotFoundError('Numba not installed')
 
 
@@ -158,13 +160,13 @@ class KFFactory:
             Subclass and overwrite the relevant wrappers.
 
     REFERENCES:
-        Thrun, Probabilistic Robotics, Chp 3.3.
-        Thrun, Probabilistic Robotics, Table 3.3.
+        Thrun, Probabilistic Robotics, Chp 3.1.
+        Thrun, Probabilistic Robotics, Table 3.1.
     """
 
     def __init__(self, A, B, C, R, Q, **kwargs):
         # Matrix Setup
-        self.A, self.B, self.C, self.D, self.R, self.Q = A, B, C, D, R, Q
+        self.A, self.B, self.C, self.R, self.Q = A, B, C, R, Q
         for key in ('A', 'B', 'C', 'R', 'Q'):
             attr = getattr(self, key)
             if not callable(attr):
@@ -174,7 +176,7 @@ class KFFactory:
 
         # Callable Setup
         njit, self.rbr = kwargs.get('njit', False), kwargs.get('rbr', False)
-        self._matmuls = factory_matmuls(rbr, njit)
+        self._matmuls = factory_matmuls(self.rbr, njit)
 
         # Matrix Preallocation
         n, m, k = self._infer_mtxsz(
@@ -183,7 +185,7 @@ class KFFactory:
         if any([(v is None) for v in (n, m, k)]):
             warn(f'Matrix sizes only partially specified: '
                  + f'n={n},m={m},k={k}')
-            assert not rbr, 'cannot return-by-ref matrices of unknown size'
+            assert not self.rbr, 'cannot return-by-ref matrices of unknown size'
         self.A_t, self.B_t, self.C_t = None, None, None
         self.R_t, self.Q_t = None, None
         if (n is not None) and (m is not None) and (k is not None):

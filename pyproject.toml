@@ -8,13 +8,14 @@ ignore = E731, W391
 [tool.pylint]
 disable = [comprehension-escape, redefined-outer-name, invalid-name,
            unused-wildcard-import, unsubscriptable-object, wildcard-import,
-           wrong-import-position, cell-var-from-loop, unused-argument, ]  # ! needs trailing comma
+           wrong-import-position, cell-var-from-loop, unused-argument,
+           no-else-return, ]  # ! needs trailing comma
 notes = [XXX, TODO,]  # ! needs trailing comma
 
 max-line-length = 80
 max-module-lines = 4000
 
-max-args = 10
+max-args = 12
 min-args = 1
 max-locals = 35
 max-statements = 100
