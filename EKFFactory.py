@@ -89,8 +89,7 @@ except ModuleNotFoundError:
 class EKFFactory(KFFactory):
     # region
     """EKF implementation for autonomous systems, as described in
-    "Probabilistic Robotics" by Sebastian Thrun. Provides indirect support for
-    nonautonomous systems.
+    "Probabilistic Robotics" by Sebastian Thrun.
 
     Directly supports:
         1. forced, unforced, autonomous, and nonautonomous systems

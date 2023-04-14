@@ -4,39 +4,35 @@ State estimator factory classes, implemented in Python. Heavily polymorphic.
 I have made these classes as polymorphic as I could while preserving both my
 sanity and the readability of my code. I have not implemented smoothers.
 
-Where applicable, these classes support:
-(1) vectorization, (2) the mixing of constant matrices and callables that
-return matrices, (3) additional arguments for callables, (4) njit optimization,
-(5) inferring matrix size from user-supplied arguments, (6) callables that
-return by reference, (7) returning estimation outputs by reference.
+These classes support:
+(1) the mixing of constant matrices and callables that
+return matrices, (2) internal matrix njit optimization,
+(3) inferring matrix size from user-supplied arguments, (4) callables that
+return by reference, (5) returning estimation outputs by reference,
+(6) additional arguments for callables.
+
+Vectorization is supported for the UKF and Particle Filter, since particle
+computations are intuitively vectorizable.
 
 ## Requirements
 * numpy -- needed for matrix multiplication and large arrays
 * (optional) numba -- used for the optional matrix multiplication speedups
 
 ## Quickstart
-This repo is designed to work as a module out-of-the-box. Each class constructs
-a function from its typical mathematical parameters. Consult class docstrings
-for expected arguments and extension to non-autonomous systems.
+This repo is designed to work as a module out-of-the-box. Each class gives
+a callable built from the typical mathematical parameters. Consult class
+docstrings for expected arguments.
 ```
 $ git clone https://github.com/lowdrant/EstimatorFactory.git
 $ python3
 >>> from EstimatorFactory import EKFFactory
 >>> help(EKFFactory)
->>> ekf = EKFFactory(g,h,G,H,R,Q)
+>>> ekf = EKFFactory(g,h,G,H,R,Q)  # callable
 >>> for i, d in enumerate(data):
 >>>     mu, sigma = ekf(prevmu, prevsigma, u, d)
 ```
 
-## Implementation Overview
-### KF Overview
-TBD
-### EKF Overview
-TODO
-### UKF Overview
-TBD
-### Particle Filter Overview
-TODO
+
 
 ## Some Thoughts
 ### On Mathematical Usage
