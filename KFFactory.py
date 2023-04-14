@@ -2,7 +2,7 @@
 __all__ = ['KFFactory']
 from warnings import warn
 
-from numpy import asarray, eye, zeros
+from numpy import asarray, eye, isscalar, zeros
 from numpy.linalg import pinv
 
 
@@ -198,7 +198,7 @@ class KFFactory:
         if (n is not None) and (m is not None) and (k is not None):
             self.A_t, self.B_t = zeros((n, n)), zeros((n, m))
             self.C_t = zeros((k, n))
-            self.R_t, self.Q_t = zeros((n, n)), zeros((m, m))
+            self.R_t, self.Q_t = zeros((n, n)), zeros((k, k))
 
     def __call__(self, mu, sigma, z, u=0, t=0):
         """Run Kalman Filter step. This function does not yet support return
@@ -217,6 +217,8 @@ class KFFactory:
         C_t = self._mtx_wrapper('C', t)
         R_t = self._mtx_wrapper('R', t)
         Q_t = self._mtx_wrapper('Q', t)
+        if isscalar(u):
+            u = [u]
         return self._matmuls(mu, sigma, u, z, A_t, B_t, C_t, R_t, Q_t)
 
     def _infer_mtxsz(self, n, m, k):
@@ -237,27 +239,33 @@ class KFFactory:
                 If a number is given for, e.g. `n`, `n` will be returned with
                 that same value.
         """
-        if (n is None) and (not callable(self.C)):
+        if (n is None) and (not callable(self.C)) and (self.C.ndim > 0):
             n = len(self.C.T)
+        elif isscalar(self.C):
+            n = 1
         elif n is None:
             for key in ('A', 'B', 'R'):
-                attr = getattr(self, key)
-                if not callable(attr):
-                    n = len(attr)
-                    break
+                n = self._infer_mtxsz_rows(key)
         if m is None:
-            for key in ('B', 'D'):
-                attr = getattr(self, key)
-                if not callable(attr):
-                    m = len(attr.T)
-                    break
+            m = self._infer_mtxsz_rows('B')
         if k is None:
             for key in ('C', 'Q'):
-                attr = getattr(self, key)
-                if not callable(attr):
-                    k = len(attr)
-                    break
+                k = self._infer_mtxsz_rows(key)
         return n, m, k
+
+    def _infer_mtxsz_rows(self, key):
+        """Used in _infer_mtxsz. Get rows of a matrix
+        INPUTS:
+            key -- attribute name of matrix
+        OUTPUTS:
+            int -- inferred row size. If unable, returns None
+        """
+        attr = getattr(self, key)
+        if (not callable(attr)) and (attr.ndim > 0):
+            return len(attr)
+        elif attr.ndim == 0:
+            return 1
+        return None
 
     def _mtx_wrapper(self, key, t, args=[]):
         """Get matrix of name <key>. Universal interface for matrix attributes.

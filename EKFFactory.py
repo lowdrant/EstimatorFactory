@@ -2,7 +2,7 @@
 __all__ = ['EKFFactory']
 from warnings import warn
 
-from numpy import asarray, eye, zeros
+from numpy import asarray, eye, isscalar, zeros
 from numpy.linalg import pinv
 
 from .KFFactory import KFFactory
@@ -78,9 +78,11 @@ except ModuleNotFoundError:
     warn('Supressing njit-optimized functions (Numba module not found).')
 
     def matmuls_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t=None, sigma_t=None):
+        """matmuls_njit placeholder for when Numba not present"""
         raise ModuleNotFoundError('Numba not installed')
 
     def matmuls_rbr_njit(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t):
+        """matmuls_rbr_njit placeholder for when Numba not present"""
         raise ModuleNotFoundError('Numba not installed')
 
 
@@ -230,20 +232,16 @@ class EKFFactory(KFFactory):
                 If a number is given for, e.g. `n`, `n` will be returned with
                 that same value.
         """
-        if (n is None) and (not callable(self.H)):
+        if (n is None) and (not callable(self.H)) and (self.H.ndim > 0):
             n = len(self.H.T)
+        elif self.H.ndim == 0:
+            n = 1
         elif n is None:
             for key in ('G', 'R'):
-                attr = getattr(self, key)
-                if not callable(attr):
-                    n = len(attr)
-                    break
+                n = self._infer_mtxsz_rows(key)
         if k is None:
             for key in ('H', 'Q'):
-                attr = getattr(self, key)
-                if not callable(attr):
-                    k = len(attr)
-                    break
+                k = self._infer_mtxsz_rows(key)
         return n, k
 
     def _init_safety_checks(self, n, k):
