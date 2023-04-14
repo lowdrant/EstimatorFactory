@@ -80,7 +80,7 @@ class EKFFactory:
     "Probabilistic Robotics" by Sebastian Thrun. Provides indirect support for
     nonautonomous systems.
 
-    Directly suppots:
+    Directly supports:
         1. mixed constant and callable Jacobian, covariance matrices
         2. return-by-reference callables (g, h, matrices)
            - if used, ALL callables must return by reference
@@ -106,8 +106,8 @@ class EKFFactory:
         means of the `*_pars` optional keyword args. See Notes.
 
     OPTIONAL INPUTS:
-        N -- int, optional -- state space dimension, default: None
-        M -- int, optional -- observation space dimention, default: None
+        n -- int, optional -- state space dimension, default: None
+        k -- int, optional -- observation space dimention, default: None
         rbr -- bool, optional -- set true if callables return by reference, default: False
         callrbr -- bool, optional -- set true if EKF call should return by reference, default: False
         njit -- bool, optional -- use njit optimization for matrix operations, default: False
@@ -145,8 +145,9 @@ class EKFFactory:
 
 
     NOTES:
-        N,M: Constructor will attempt to infer matrix size from matrices. This
-             will not overwrite N or M if they are specified.
+        n,k:
+            Constructor will attempt to infer matrix size from matrices. This
+            will not overwrite n or k if they are specified at construction
 
         return-by-reference: THIRD (3rd) function arg must be
                              return-by-reference variable. Also, ALL callables
@@ -155,19 +156,15 @@ class EKFFactory:
                              function returns by reference, I did not provide
                              an rbr flag for each possible callable.
 
-        Variable covariance: Covariance callables get passed (u,mu,sigma,z).
-                             If you need something else, try overriding
-                             the relevant wrapper call signature, e.g. _Qfun,
-                             and the relevant linearization method.
+        Callables with more args:
+            Each callable also has an assosciated keyword argument,
+            <callable_name>_pars, which is an iterable e of additional
+            parameters to be passed when called. It will be passed like so
+            for `A`: `A(t, *A_pars, self.A_t)`.
 
-        Callables with more args: Each callable also has an assosciated
-                                  keyword argument, <callable_name>_pars,
-                                  which is an iterable e of additional
-                                  parameters to be passed when called. It will
-                                  be passed like so for `g`: `g(u,mu,*g_pars)`.
+        Callables with very different call signatures:
+            Subclass and overwrite the relevant wrappers.
 
-        Callables with very different call signatures: Subclass and overwrite
-                                                       the relevant wrappers.
 
     REFERENCES:
         Thrun, Probabilistic Robotics, Chp 3.3.
@@ -176,64 +173,85 @@ class EKFFactory:
     # endregion
 
     def __init__(self, g, h, G, H, R, Q, **kwargs):
-        N, M = kwargs.get('N', None), kwargs.get('M', None)
-        rbr = kwargs.get('rbr', False)
-        njit = kwargs.get('njit', False)
-        callrbr = kwargs.get('callrbr', False)
-        for k in ('g_pars', 'h_pars', 'G_pars', 'H_pars', 'R_pars', 'Q_pars'):
-            attr = kwargs.get(k, [])
-            setattr(self, k, list(attr))
-        N, M = self._infer_mtxsz(N, M, G, H, R, Q)
-        self._init_safety_checks(g, h, N, M, rbr)
-
+        # EKF Setup
+        self.g, self.h = g, h
         self.G = G if callable(G) else asarray(G)
         self.H = H if callable(H) else asarray(H)
         self.R = R if callable(R) else asarray(R)
         self.Q = Q if callable(Q) else asarray(Q)
+        for key in ('g', 'h', 'G', 'H', 'R', 'Q'):  # k is a variable later
+            pkey = key + '_pars'
+            pars = kwargs.get(key + '_pars', [])
+            setattr(self, pkey, pars)
 
-        self.mubar, self.zhat, self.G_t, self.H_t = None, None, None, None
-        self.R_t, self.Q_t = None, None
-        if (N is None) or (M is None):
+        # Size Inference and Preallocation
+        n, k = self._infer_mtxsz(kwargs.get('n', None), kwargs.get('k', None))
+        for key in ('mubar', 'zhat', 'G_t', 'H_t', 'R_t', 'Q_t'):
+            setattr(self,key,None)
+        if (n is None) or (k is None):
             warn('Unable to infer matrix size. Return be reference will fail')
         else:
-            self.mubar, self.zhat = zeros(N), zeros(M)
-            self.G_t, self.H_t = zeros((N, N)), zeros((M, N))
-            self.R_t, self.Q_t = zeros((N, N)), zeros((M, M))
+            self.mubar, self.zhat = zeros(n), zeros(k)
+            self.G_t, self.H_t = zeros((n, n)), zeros((k, n))
+            self.R_t, self.Q_t = zeros((n, n)), zeros((k, k))
 
-        self.g, self.h, self.rbr = g, h, rbr
-        self._matmuls = factory_matmuls(callrbr, njit)
+        # Implementation Selection
+        rbr = kwargs.get('rbr', False)
+        njit = kwargs.get('njit', False)
+        callrbr = kwargs.get('callrbr', False)
+        self._matmuls = factory_matmuls(self.rbr, njit)
         self._linearize = self._factory_linearize(rbr)
+        self._init_safety_checks(n, k)
 
     def __call__(self, mu, sigma, u, z, mu_t=None, sigma_t=None):
         """run EKF - see Thrun, Probabilistic Robotics, Table 3.3 """
         mubar, zhat, G, H, R, Q = self._linearize(mu, sigma, u, z)
-        return self._matmuls(sigma, z, R, Q, H, G, mubar, zhat, mu_t, sigma_t)
-        return self._matmuls(mubar, sigma, z, zhat, G, H, R, Q)
+        return self._matmuls(mubar, sigma, z, zhat, G, H, R, Q, mu_t, sigma_t)
+
     # ========================================================================
     # Setup
 
-    @staticmethod
-    def _infer_mtxsz(N, M, G, H, R, Q):
-        """Infer matrix size."""
-        if N is None:
-            N = len(G) if not callable(G) else N
-            N = len(R) if not callable(R) else N
-        if M is None:
-            M = len(Q) if not callable(Q) else M
-        if not callable(H):  # H contains both
-            M = len(H) if M is None else M
-            N = len(H[0]) if N is None else N
-        return N, M
+    def _infer_mtxsz(self, n, k):
+        """Infer matrix sizes. No overwrite if n, k given as numbers.
+        INPUTS:
+            n -- int -- state size, None if unknown
+            k -- int -- observation size, None if unknown
+        OUTPUTS:
+            n, k -- Inferred space sizes. If number is given in function
+                    call, same number will be returned. Otherwise, size
+                    of relevant matrix. If unable to infer, None.
+        NOTES:
+            No Error Checks:
+                Does not check for matrix size consistency, or that matrix size
+                matches the provided numbers.
+            No Overwrite:
+                If a number is given for, e.g. `n`, `n` will be returned with
+                that same value.
+        """
+        if (n is None) and (not callable(self.H)):
+            n = len(self.H.T)
+        elif n is None:
+            for key in ('G', 'R'):
+                attr = getattr(self, key)
+                if not callable(attr):
+                    n = len(attr)
+                    break
+        if k is None:
+            for key in ('H', 'Q'):
+                attr = getattr(self, key)
+                if not callable(attr):
+                    k = len(attr)
+                    break
+        return n, k
 
-    @staticmethod
-    def _init_safety_checks(g, h, N, M, rbr):
+    def _init_safety_checks(self, n, k):
         """Provide informative error messages to user."""
-        assert callable(g), 'g must be callable'
-        assert callable(h), 'h must be callable'
-        if (N is None) ^ (M is None):
-            warn(f'Matrix sizes only partially specified: N={N},M={M}')
-        if (N is None) or (M is None):
-            assert not rbr, 'cannot return-by-ref matrices of unknown size'
+        assert callable(self.g), 'g must be callable'
+        assert callable(self.h), 'h must be callable'
+        if (n is None) ^ (k is None):
+            warn(f'Matrix sizes only partially specified: n={n},k={k}')
+        if (n is None) or (k is None):
+            assert not self.rbr, 'cannot return-by-ref matrices of unknown size'
 
     # ========================================================================
     # Dynamics Wrappers
