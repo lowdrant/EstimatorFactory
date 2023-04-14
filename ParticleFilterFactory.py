@@ -18,21 +18,27 @@ class ParticleFilterFactory:
         3. additional (user-supplied) parameters passed to callables
 
     Indirectly supports:
-        1. Nonautonomous systems via direct attribute access (see Examples)
-        2. Changing call signatures via subclassing (see Notes)
+        1. unorthodox call signatures via direct attribute access
 
     REQUIRED INPUTS:
-        pxt -- callable -- (X0,u,z)->X1 samples current state given prior state
-        pzt -- callable -- (X1,z)->w returns probability of observations zt given state xt
+        pxt -- callable -- (t,X0,u,z)->X1 samples current state given prior state
+        pzt -- callable -- (t,X,z)->wt odds of measurement `z` given state `X`
+
+        Callables are expected to take `time` as the first argument, followed
+        by additonal parameters. If return-by-reference, the return-by-ref
+        argument should be LAST. See Examples.
+
+        Any additional parameters are passed through the `*_pars` keyword args.
+        See Notes or Examples.
 
     OPTIONAL INPUTS:
-        vec -- bool, optional, default:False -- enable vectorized pxt,pzt calls
-        pxt_pars -- iterable, optional, default:[] -- additonal args for pxt
-        pzt_pars -- iterable, optional, default:[] -- additonal args for pzt
-        P -- int, optional -- required for `rbr`; number of particles in filter
-        N -- int, optional -- required for `rbr`; state space size
-        rbr -- bool, optional, default:False -- enable return-by-reference pxt,pzt calls
-        dbg -- bool, optional, default:False -- log prediction and resampling arrays
+        vec -- bool, default:False -- enable vectorized pxt,pzt calls
+        pxt_pars -- iterable, default:[] -- additonal args for pxt
+        pzt_pars -- iterable, default:[] -- additonal args for pzt
+        P -- int, optional -- required for `rbr`; number of particles used
+        N -- int, optional -- required for `rbr`; state size
+        rbr -- bool, default:False -- enable return-by-reference pxt,pzt calls
+        dbg -- bool, default:False -- log prediction and resampling arrays
 
     USEFUL ATTRIBUTES:
         pxt_pars/pzt_pars -- Arguments passed to pxt (pzt). Change this to
@@ -50,31 +56,30 @@ class ParticleFilterFactory:
     EXAMPLES:
         Run a single particle filter step:
         >>> pf = ParticleFilterFactory(pxt, pzt)
-        >>> Xt1 = pf(Xt0, ut0, zt0)
+        >>> Xt1 = pf(Xt0, zt0, ut0, t0)
 
         Run particle filter when prediction depends on timestep:
-        >>> # def pxt(Xtm1, u, dt)
+        >>> # def pxt(t, Xtm1, u, dt)
         >>> kwargs = {'pxt_pars': dt}
         >>> pf = ParticleFilterFactory(pxt, pzt, **kwargs)
 
         Run particle filter with return-by-reference and extra args:
-        - return-by-reference must be 3rd argument
-        >>> # def pxt(Xtm1, u, Xt, *pxt_pars)
-        >>> # def pzt(zt, Xt, wt, *pzt_pars)
+        - return-by-reference must be LAST argument
+        >>> # def pxt(t, Xtm1, u, *pxt_pars, Xt)
+        >>> # def pzt(t, zt, Xt, *pzt_pars, wt)
         >>> kwargs = {'pxt_pars': dt, ...}
         >>> pf = ParticleFilterFactory(pxt, pzt, **kwargs)
 
-        Run particle filter with non-autonomous transition function:
+        Run particle filter with unorthodox transition function:
         >>> # -- initialize --
-        >>> # def pxt(Xtm1, u, t)
-        >>> kwargs = {'pxt_pars': 0}  # init a time 0
-        >>> pf = ParticleFilterFactory(pxt, pzt, **kwargs)
+        >>> # def pxt(t, Xtm1, u, par1)
+        >>> pf = ParticleFilterFactory(pxt, pzt, pxt_pars=[0])
         >>>
         >>> # -- run filter --
-        >>> # t = arange(0,tf,dt)
+        >>> # t = arange(t0,tf,dt)
         >>> for i, ti in enumerate(t):
-        >>>     Xt[i] = pf(Xt[i-1], u[i], z[i])
-        >>>     pf.pxt_pars = [ti]  # arg update -- ENSURE iterable
+        >>>     Xt[i] = pf(Xt[i-1], u[i-1], z[i])
+        >>>     pf.pxt_pars = mypar(ti)  # arg update -- ENSURE iterable
 
     NOTES:
         pzt:
@@ -83,13 +88,13 @@ class ParticleFilterFactory:
             to 1.
 
         Return-by-Reference Function Calls:
-            THIRD (3rd) function arg must be return-by-reference variable.
-            Also, ALL callables must be return by reference if this option is
-            used. Since it is not possible to tell if a function returns by
+            LAST function arg must be return-by-reference variable. Also, ALL
+            callables must be return by reference if this option is used.
+            Since it is not possible to tell if a function returns by
             reference, I did not provide an rbr flag for each possible
             callable.
 
-        Return-by-Reference for gGining Speed:
+        Return-by-Reference for Gaining Speed:
             Currently impossible to fully avoid runtime memory allocation.
             Also, probably only worth it if your arrays are MASSIVE.
             The internal resampling method forces at least one array copy,
@@ -133,20 +138,20 @@ class ParticleFilterFactory:
             self.out = zeros((P, N + 1))
         elif rbr:
             raise RuntimeError(
-                f'Filter size incomplete:P={P},N={N} and rbr True')
+                f'Particle size incomplete:P={P},N={N} and rbr=True')
         self._flow = self._flow_factory(vec, rbr)
 
-    def __call__(self, Xtm1, ut, zt):
+    def __call__(self, Xtm1, zt, ut=0, t=0, out=None):
         """Run particle filter.
         INPUTS:
             Xtm1 -- PxN -- P particles of length-N state vectors at time t-1
             ut -- input at time t
             zt -- K -- observations at time t
-            Xt -- optional, PxN -- return-by-reference output
+            Xt -- PxN -- return-by-reference output
         OUTPUTS:
             Xt -- PxN -- predicted particles at time t
         """
-        out = self._flow(Xtm1, ut, zt)
+        out = self._flow(Xtm1, zt, ut, t)
         if self.dbg:
             self.Xbart_dbg.append(out.copy())
         return self._resample(out[:, :-1], out[:, -1])
@@ -169,6 +174,7 @@ class ParticleFilterFactory:
     #
 
     def _flow_factory(self, vec, rbr):
+        """Get correct particle flow calculation based on init args"""
         if vec and rbr:
             return self._flow_vec_rbr
         elif vec:
@@ -177,33 +183,33 @@ class ParticleFilterFactory:
             return self._flow_iter_rbr
         return self._flow_iter
 
-    def _flow_iter(self, Xtm1, ut, zt):
+    def _flow_iter(self, Xtm1, zt, ut, t):
         """Iterative prediction calculation. Returns directly."""
         out = zeros((Xtm1.shape[0], Xtm1.shape[1] + 1))
         for i in range(len(out)):
-            out[i, :-1] = self.pxt(Xtm1[i], ut, *self.pxt_pars)
-            out[i, -1] = self.pzt(zt, out[i, :-1], *self.pzt_pars)
+            out[i, :-1] = self.pxt(t, Xtm1[i], ut, *self.pxt_pars)
+            out[i, -1] = self.pzt(t, zt, out[i, :-1], *self.pzt_pars)
         return out
 
-    def _flow_iter_rbr(self, Xtm1, ut, zt):
+    def _flow_iter_rbr(self, Xtm1, zt, ut, t):
         """Iterative prediction calculation. Returns-by-reference."""
         self.out[...] = 0
         for i in range(len(self.out)):
-            self.pxt(Xtm1[i], ut, self.out[i, :-1], *self.pxt_pars)
-            self.out[i, -1] = self.pzt(zt, self.out[i, :-1],
-                                       self.out[i, -1], *self.pzt_pars)
+            self.pxt(t, Xtm1[i], ut, *self.pxt_pars, self.out[i, :-1],)
+            self.out[i, -1] = self.pzt(t, zt, self.out[i, :-1],
+                                       *self.pzt_pars, self.out[:, -1])
         return self.out
 
-    def _flow_vec(self, Xtm1, ut, zt):
+    def _flow_vec(self, Xtm1, zt, ut, t):
         """Vectorized prediction calculation. Returns directly."""
         out = zeros((Xtm1.shape[0], Xtm1.shape[1] + 1))
-        out[:, :-1] = self.pxt(Xtm1, ut, *self.pxt_pars)
-        out[:, -1] = self.pzt(zt, out[:, :-1], *self.pzt_pars)
+        out[:, :-1] = self.pxt(t, Xtm1, ut, *self.pxt_pars)
+        out[:, -1] = self.pzt(t, zt, out[:, :-1], *self.pzt_pars)
         return out
 
-    def _flow_vec_rbr(self, Xtm1, ut, zt):
+    def _flow_vec_rbr(self, Xtm1, zt, ut, t):
         """Vectorized prediction calculation. Returns-by-reference."""
         self.out[...] = 0
-        self.pxt(Xtm1, ut, self.out[:, :-1], *self.pxt_pars)
-        self.pzt(zt, self.out[:, :-1], self.out[:, -1], *self.pzt_pars)
+        self.pxt(t, Xtm1, ut, *self.pxt_pars, self.out[:, :-1])
+        self.pzt(t, zt, self.out[:, :-1], *self.pzt_pars, self.out[:, -1])
         return self.out
