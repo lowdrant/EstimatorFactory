@@ -182,8 +182,9 @@ class KFFactory:
             setattr(self, pkey, kwargs.get(pkey, []))
 
         # Callable Setup
-        njit, self.rbr = kwargs.get('njit', False), kwargs.get('rbr', False)
-        self._matmuls = factory_matmuls(self.rbr, njit)
+        self.rbr = kwargs.get('rbr', False)
+        njit, callrbr = kwargs.get('njit', False), kwargs.get('callrbr', False)
+        self._matmuls = factory_matmuls(callrbr, njit)
 
         # Matrix Preallocation
         n, m, k = self._infer_mtxsz(
@@ -200,7 +201,7 @@ class KFFactory:
             self.C_t = zeros((k, n))
             self.R_t, self.Q_t = zeros((n, n)), zeros((k, k))
 
-    def __call__(self, mu, sigma, z, u=0, t=0):
+    def __call__(self, mu, sigma, z, u=0, t=0, mu_t=None, sigma_t=None):
         """Run Kalman Filter step. This function does not yet support return
         by reference.
         INPUTS:
@@ -219,7 +220,8 @@ class KFFactory:
         Q_t = self._mtx_wrapper('Q', t)
         if isscalar(u):
             u = [u]
-        return self._matmuls(mu, sigma, u, z, A_t, B_t, C_t, R_t, Q_t)
+        return self._matmuls(mu, sigma, u, z, A_t, B_t, C_t, R_t, Q_t, mu_t,
+                             sigma_t)
 
     def _infer_mtxsz(self, n, m, k):
         """Infer matrix sizes. No overwrite if n, m, or k given as numbers.
